@@ -24,6 +24,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.inputmethod.CompletionInfo;
 import android.view.inputmethod.CorrectionInfo;
@@ -41,11 +42,8 @@ import com.jecelyin.common.utils.L;
 public class InputConnectionHacker implements InputConnection {
     private final InputConnection ic;
     private final EditAreaView editAreaView;
+    private String cursorBeforeText, cursorAfterText;
     private boolean isShiftPressed;
-    private boolean isAltPressed;
-    private boolean isSymPressed;
-    private boolean isCtrlPressed;
-    public String cursorBeforeText;
 
     public InputConnectionHacker(InputConnection ic, EditAreaView editAreaView) {
         this.ic = ic;
@@ -53,15 +51,42 @@ public class InputConnectionHacker implements InputConnection {
     }
 
     @Override
+    public boolean equals(Object obj) {
+        boolean rt = false;
+        if (obj instanceof InputConnectionHacker) {
+            rt = ((InputConnectionHacker)obj).ic == this.ic;
+        }
+        return rt || super.equals(obj);
+    }
+
+    public void updateCursorText(String cursorBeforeText, String cursorAfterText) {
+        L.d("cursorBeforeText:%s cursorAfterText:%s", cursorBeforeText, cursorAfterText);
+        this.cursorBeforeText = cursorBeforeText;
+        this.cursorAfterText = cursorAfterText;
+    }
+
+    @Override
     public CharSequence getTextBeforeCursor(int n, int flags) {
 //        return ic.getTextBeforeCursor(n, flags);
-        // TODO: 2017/8/28
-        return cursorBeforeText == null ? "" : cursorBeforeText;
+        if (cursorBeforeText == null) {
+            return "";
+        }
+        int length = cursorBeforeText.length();
+        if (n > length)
+            n = length;
+        return cursorBeforeText.substring(length - n, length);
     }
 
     @Override
     public CharSequence getTextAfterCursor(int n, int flags) {
-        return ic.getTextAfterCursor(n, flags);
+//        return ic.getTextAfterCursor(n, flags);
+        if (cursorAfterText == null) {
+            return "";
+        }
+        int length = cursorAfterText.length();
+        if (n > length)
+            n = length;
+        return cursorAfterText.substring(0, n);
     }
 
     @Override
@@ -71,7 +96,13 @@ public class InputConnectionHacker implements InputConnection {
 
     @Override
     public int getCursorCapsMode(int reqModes) {
-        return ic.getCursorCapsMode(reqModes);
+//        return ic.getCursorCapsMode(reqModes);
+        String text;
+        if (cursorBeforeText == null || cursorAfterText == null)
+            text = "";
+        else
+            text = cursorBeforeText + cursorAfterText;
+        return TextUtils.getCapsMode(text, cursorBeforeText == null ? 0 : cursorBeforeText.length(), reqModes);
     }
 
     @Override
@@ -80,22 +111,29 @@ public class InputConnectionHacker implements InputConnection {
         String text = editAreaView.getSelectedText();
         if (text == null) text = "";
         ExtractedText et = new ExtractedText();
+        if (!TextUtils.isEmpty(text)) {
+            et.selectionStart = 0;
+            et.selectionEnd = text.length();
+        } else {
+            et.selectionStart = 5;
+            et.selectionEnd = 5;
+            text = "that is text\ntest test"; //修正输入法无法左右移动 todo: 这里应该返回所有文本，目前还不知道这样做有什么后遗症
+        }
         et.text = text;
+        et.partialStartOffset = 0;
         et.partialEndOffset = text.length();
-        et.selectionStart = 0;
-        et.selectionEnd = text.length();
-        et.flags = 0;
         return et;
     }
 
     @Override
     public boolean deleteSurroundingText(int beforeLength, int afterLength) {
-        boolean b = ic.deleteSurroundingText(beforeLength, afterLength);
+//        boolean b = ic.deleteSurroundingText(beforeLength, afterLength);
         beginBatchEdit();
         sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL));
         sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DEL));
         endBatchEdit();
-        return b;
+//        return b;
+        return true;
     }
 
     @Override
@@ -162,24 +200,38 @@ public class InputConnectionHacker implements InputConnection {
         int keyCode = event.getKeyCode();
         if (keyCode == KeyEvent.KEYCODE_SHIFT_LEFT || keyCode == KeyEvent.KEYCODE_SHIFT_RIGHT) {
             isShiftPressed = event.getAction() == KeyEvent.ACTION_DOWN;
+            setShiftPressed(isShiftPressed);
         } else if (keyCode == KeyEvent.KEYCODE_ALT_LEFT || keyCode == KeyEvent.KEYCODE_ALT_RIGHT
                 || keyCode == KeyEvent.KEYCODE_NUM) {
-            isAltPressed = event.getAction() == KeyEvent.ACTION_DOWN;
-        } else if (keyCode == KeyEvent.KEYCODE_SYM) {
-            isSymPressed = event.getAction() == KeyEvent.ACTION_DOWN;
+            boolean isAltPressed = event.getAction() == KeyEvent.ACTION_DOWN;
+            setAltPressed(isAltPressed);
         } else if (keyCode == KeyEvent.KEYCODE_CTRL_LEFT || keyCode == KeyEvent.KEYCODE_CTRL_RIGHT) {
-            isCtrlPressed = event.getAction() == KeyEvent.ACTION_DOWN;
+            boolean isCtrlPressed = event.getAction() == KeyEvent.ACTION_DOWN;
+            setCtrlPressed(isCtrlPressed);
         }
+      
         return ic.sendKeyEvent(event);
+    }
+
+    private void setShiftPressed(boolean b) {
+        editAreaView.execCommand(new EditorCommand.Builder("setShiftPressed").put("value", b).build());
+    }
+
+    private void setAltPressed(boolean b) {
+        editAreaView.execCommand(new EditorCommand.Builder("setAltPressed").put("value", b).build());
+    }
+
+    private void setCtrlPressed(boolean b) {
+        editAreaView.execCommand(new EditorCommand.Builder("setCtrlPressed").put("value", b).build());
     }
 
     @Override
     public boolean clearMetaKeyStates(int states) {
-        isAltPressed = false;
-        isShiftPressed = false;
-        isCtrlPressed = false;
-        isSymPressed = false;
-        editAreaView.clearSelection();
+        L.d("clearMetaKeyStates");
+        setShiftPressed(false);
+        setAltPressed(false);
+        setCtrlPressed(false);
+
         return ic.clearMetaKeyStates(states);
     }
 
@@ -199,22 +251,6 @@ public class InputConnectionHacker implements InputConnection {
             return ic.requestCursorUpdates(cursorUpdateMode);
         }
         return false;
-    }
-
-    public boolean isShiftPressed() {
-        return isShiftPressed;
-    }
-
-    public boolean isAltPressed() {
-        return isAltPressed;
-    }
-
-    public boolean isSymPressed() {
-        return isSymPressed;
-    }
-
-    public boolean isCtrlPressed() {
-        return isCtrlPressed;
     }
 
     @TargetApi(Build.VERSION_CODES.N)

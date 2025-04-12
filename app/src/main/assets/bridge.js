@@ -21,6 +21,11 @@
  * @param editor Editor
  * @constructor
  */
+var KeyEventHook = {
+    isShiftPressed : false,
+    isAltPressed : false,
+    isCtrlPressed : false,
+};
 function Bridge(editor) {
     this.mode = null;
     this.lastTextLength = 0;
@@ -33,6 +38,18 @@ function Bridge(editor) {
         } else {
             alert('Unknown cmd: ' + cmd);
         }
+    };
+
+    this.setShiftPressed = function (data) {
+        KeyEventHook.isShiftPressed = data['value'];
+    };
+
+    this.setAltPressed = function (data) {
+        KeyEventHook.isAltPressed = data['value'];
+    };
+
+    this.setCtrlPressed = function (data) {
+        KeyEventHook.isCtrlPressed = data['value'];
     };
 
     this.redo = function () {
@@ -320,9 +337,13 @@ function Bridge(editor) {
             try {
                 var cursor = self.editor.getSelection().getCursor();
                 var range = new Range(cursor.row, Math.max(0, cursor.column - 30), cursor.row, cursor.column);
-                var text = self.editor.session.getDocument().getTextRange(range);
-                AndroidEditor.updateCursorBeforeText(text);
-            } catch (e) { }
+                var line = self.editor.session.getDocument().getLine(cursor.row);
+                var before = line.substring(Math.max(0, cursor.column - 30), cursor.column);
+                var after = line.substring(cursor.column, cursor.column + 30);
+                AndroidEditor.updateCursorText(before, after);
+            } catch (e) {
+                console.log(e);
+            }
         });
         this.editor.on("onLongTouch", function () {
             self.showActionMode();
